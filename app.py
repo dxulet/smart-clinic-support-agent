@@ -91,13 +91,22 @@ async def find_nearest_match(query_embedding: List[float], k: int = 5) -> List[D
         print(f"Error details: {str(e)}")  # Add debugging
         raise HTTPException(status_code=500, detail=f"Error finding matches: {str(e)}")
 
-async def get_chat_completion(query: str, context: List[Dict[str, Any]]) -> str:
+async def get_clinic_info() -> Dict[str, Any]:
+    """Get clinic information"""
+    try:
+        response = supabase.table("clinic_info").select("*").limit(1).execute()
+        return response.data[0] if response.data else {}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting clinic info: {str(e)}")
+
+async def get_chat_completion(query: str, context: List[Dict[str, Any]], clinic_info: Dict[str, Any] = None) -> str:
     """
     Get a chat completion response using the GPT-4 model.
     
     Args:
         query (str): The user's query
         context (List[Dict]): List of relevant service records
+        clinic_info (Dict): General clinic information
         
     Returns:
         str: The model's response
@@ -109,22 +118,35 @@ async def get_chat_completion(query: str, context: List[Dict[str, Any]]) -> str:
             azure_endpoint=os.getenv("AZURE_OPENAI_CHAT_ENDPOINT")
         )
 
-        # Format context from matches in a more structured way
         context_texts = []
+        
+        # Add clinic info if available
+        if clinic_info:
+            clinic_text = (
+                f"Clinic Information:\n"
+                f"Address: {clinic_info.get('address', 'N/A')}\n"
+                f"Phone: {clinic_info.get('phone', 'N/A')}\n"
+                f"Operating Hours: {clinic_info.get('operating_hours', 'N/A')}"
+            )
+            context_texts.append(clinic_text)
+        
+        # Add services info if available
         for doc in context:
             service_info = (
-                f"Service: {doc['content']}\n"
-                f"Specialty: {doc['specialty']}\n"
-                f"Price: ${doc['price']}\n"
-                f"Category: {doc['category']}"
+                f"Service Information:\n"
+                f"Service: {doc.get('content', 'N/A')}\n"
+                f"Specialty: {doc.get('specialty', 'N/A')}\n"
+                f"Price: {doc.get('price', 'N/A')} tenge\n"
+                f"Category: {doc.get('category', 'N/A')}"
             )
             context_texts.append(service_info)
         
         formatted_context = "\n\n".join(context_texts)
         
-        system_message = """You are a helpful clinic assistant. Use the provided context to answer questions about the clinic. 
-        Be sure to include relevant details about services, specialties, prices, and categories when available. The currency is in tenge. 
-        If the answer cannot be found in the context, politely say so and suggest asking about services, doctors, location, or operating hours."""
+        system_message = """You are a helpful clinic assistant. Use the provided context to answer questions about the clinic, 
+        its services, and general information. Be sure to include relevant details about services, specialties, 
+        prices, schedules, and contact information when available. If the answer cannot be found in the context, politely suggest 
+        contacting the clinic directly."""
         
         response = client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_CHAT_MODEL"),
@@ -146,19 +168,16 @@ async def query_handler(request: Request):
         data = await request.json()
         query_text = data.get("message", "")
         
-        # Step 1: Create embedding for the query
-        query_embedding = await create_embedding(query_text)
+        # Get clinic info for all queries
+        clinic_info = await get_clinic_info()
         
-        # Step 2: Find nearest matches
+        # For service-related queries, use vector search
+        query_embedding = await create_embedding(query_text)
         matches = await find_nearest_match(query_embedding)
         
-        # Step 3: Get chat completion
-        if matches:
-            print(f"Matches: {matches}")
-            response_text = await get_chat_completion(query_text, matches)
-            return {"response": response_text}
-        
-        return {"response": "I apologize, but I couldn't find relevant information for your query. Please try asking about our clinic's services, doctors, location, or operating hours."}
+        # Get chat completion with all available context
+        response_text = await get_chat_completion(query_text, matches, clinic_info)
+        return {"response": response_text}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
