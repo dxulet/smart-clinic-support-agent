@@ -1,44 +1,6 @@
 -- Enable the pgvector extension to work with embedding vectors
 create extension if not exists vector;
 
--- Create a table to store your documents
-create table
-  services (
-    id uuid primary key,
-    content text not null, -- LangChain's default content column
-    metadata jsonb, -- LangChain's default metadata column
-    embedding vector (1536), -- 1536 works for OpenAI embeddings, change if needed
-    price numeric(10,2),
-    created_at timestamp with time zone default timezone('utc'::text, now()) not null
-  );
-
--- Create a function to search for documents
-create function match_services (
-  query_embedding vector(1536),
-  match_threshold float default 0.5,
-  match_count int default 5
-) returns table (
-  id uuid,
-  content text,
-  metadata jsonb,
-  price numeric(10,2),
-  similarity float
-) language plpgsql as $$
-begin
-  return query
-  select
-    s.id,
-    s.content,
-    s.metadata,
-    s.price,
-    1 - (s.embedding <=> query_embedding) as similarity
-  from services s
-  where 1 - (s.embedding <=> query_embedding) > match_threshold
-  order by s.embedding <=> query_embedding
-  limit match_count;
-end;
-$$;
-
 -- Create doctors table
 create table doctors (
     id uuid primary key default uuid_generate_v4(),
@@ -75,3 +37,43 @@ values (
     '+7‒771‒626‒70‒70',
     'Monday-Friday: 8:00 AM - 8:00 PM, Saturday: 9:00 AM - 5:00 PM, Sunday: Closed'
 );
+
+-- Create services table
+create table if not exists services (
+  id bigint generated always as identity primary key,
+  content text not null,
+  specialty text not null,
+  price numeric(10,2) not null,
+  category text not null,
+  embedding vector(1536),
+  created_at timestamptz default now()
+);
+
+-- Create a function to match services
+create or replace function match_services (
+  query_embedding vector(1536),
+  match_count int default 5
+) returns table (
+  id bigint,
+  content text,
+  specialty text,
+  price numeric(10,2),
+  category text,
+  similarity float
+)
+language plpgsql
+as $$
+begin
+  return query
+  select
+    services.id,
+    services.content,
+    services.specialty,
+    services.price,
+    services.category,
+    1 - (services.embedding <=> query_embedding) as similarity
+  from services
+  order by services.embedding <=> query_embedding
+  limit match_count;
+end;
+$$;
