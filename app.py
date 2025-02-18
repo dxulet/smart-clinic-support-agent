@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from models.query import QueryRequest, QueryResponse
 from services.vector_service import VectorService
 from services.ai_service import AIService
+from utils.whatsapp_response import send_response, send_whatsapp_text_message
 
 app = FastAPI(title="Clinic Support Agent")
 
@@ -24,6 +25,12 @@ async def query_handler(request: Request):
         
         # Get AI response
         response_text = await ai_service.get_chat_completion(query.message, matches, clinic_info)
+
+        # Whatsapp Response
+        send = await send_response(response_text)
+        if not send:
+            raise HTTPException(status_code=500, detail="Failed to send response to Whatsapp")
+
         return QueryResponse(response=response_text)
     
     except Exception as e:

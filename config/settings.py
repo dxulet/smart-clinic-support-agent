@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     azure_openai_chat_api_version: str
     azure_openai_chat_endpoint: str
     azure_openai_chat_model: str
+
+    # Whatsapp settings
+    whatsapp_token: str
     
     class Config:
         env_file = ".env"
